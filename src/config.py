@@ -32,5 +32,5 @@ class SolveConfig:
     # Erlaubte Wartezeit (zu früh ankommen -> warten bis Zeitfenster öffnet)
     max_wait_min: int = 240
 
-    # Optionale harte Maximaldauer pro Route (0 = keine)
-    max_route_duration_min: int = 0
+    # Harte Maximaldauer pro Route in Minuten
+    max_route_duration_min: int = 240

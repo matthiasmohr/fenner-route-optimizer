@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtuelle Umgebungen
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Ausgabe-Dateien (werden zur Laufzeit generiert)
+solution.xlsx
+solution_map.html
+solution_relaxed.xlsx
+solution_relaxed_map.html
+
+# Betriebssystem
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/
+
+# Umgebungsvariablen
+.env
