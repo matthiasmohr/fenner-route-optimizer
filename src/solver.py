@@ -148,6 +148,19 @@ def solve_vrptw(
         node = manager.IndexToNode(idx)
         tmin = solution.Value(time_dim.CumulVar(idx))
         route.append((node, tmin, 0))
+
+        # Fix: Depot-Startzeit korrigieren.
+        # Der Solver setzt CumulVar(Start) oft auf 0, weil der Start-Zeitpunkt
+        # keine Kostenwirkung hat. Wir berechnen die echte Abfahrtszeit aus dem
+        # ersten Kundenstopp zurück: Ankunft_Kunde − Fahrzeit − Servicezeit.
+        if len(route) >= 2:
+            first_node = route[1][0]
+            first_tmin = route[1][1]
+            travel     = time_matrix_min[0][first_node]
+            service    = node_service_mins[first_node]
+            departure  = max(0, first_tmin - travel - service)
+            route[0]   = (route[0][0], departure, route[0][2])
+
         routes.append(route)
 
     return {
@@ -245,6 +258,16 @@ def solve_vrptw_relaxed_soft_timewindows(
         node = manager.IndexToNode(idx)
         tmin = sol.Value(time_dim.CumulVar(idx))
         route.append((node, tmin, 0))
+
+        # Fix: Depot-Startzeit korrigieren (gleiche Logik wie solve_vrptw)
+        if len(route) >= 2:
+            first_node = route[1][0]
+            first_tmin = route[1][1]
+            travel     = time_matrix_min[0][first_node]
+            service    = node_service_mins[first_node]
+            departure  = max(0, first_tmin - travel - service)
+            route[0]   = (route[0][0], departure, route[0][2])
+
         routes.append(route)
 
     # Verletzungen reporten (gegen Original-TWs)

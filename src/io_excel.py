@@ -57,7 +57,9 @@ def parse_optional_window(von, bis, ref_date: date) -> tuple[int, int] | None:
 def load_einsender_excel(path: str, solve_cfg: SolveConfig) -> pd.DataFrame:
     """
     Erwartete Spalten (case-insensitive):
-      - id oder name (optional)
+      - einsender (Freitext-Name)
+      - adresse   (Freitext-Adresse)
+      - id oder name (optional, Fallback)
       - lat, lon
       - abholung 1 von, abholung 1 bis
       - abholung 2 von, abholung 2 bis
@@ -81,8 +83,14 @@ def load_einsender_excel(path: str, solve_cfg: SolveConfig) -> pd.DataFrame:
     if "service_min" not in df.columns:
         df["service_min"] = solve_cfg.default_service_min
 
-    df["tw1"] = df.apply(lambda r: parse_optional_window(r["abholung 1 von"], r["abholung 1 bis"], solve_cfg.reference_date), axis=1)
-    df["tw2"] = df.apply(lambda r: parse_optional_window(r["abholung 2 von"], r["abholung 2 bis"], solve_cfg.reference_date), axis=1)
+    df["tw1"] = df.apply(
+        lambda r: parse_optional_window(r["abholung 1 von"], r["abholung 1 bis"], solve_cfg.reference_date),
+        axis=1,
+    )
+    df["tw2"] = df.apply(
+        lambda r: parse_optional_window(r["abholung 2 von"], r["abholung 2 bis"], solve_cfg.reference_date),
+        axis=1,
+    )
 
     return df
 
@@ -130,51 +138,67 @@ def build_nodes_mandatory_both_windows(
     Modell:
       - Node 0: Depot (Labor)
       - Für jeden Einsender:
-          - Wenn tw1 vorhanden -> Node "Einsender (Pickup1)" Pflicht
-          - Wenn tw2 vorhanden -> Node "Einsender (Pickup2)" Pflicht
+          - Wenn tw1 vorhanden -> Node "Einsender (Abh. 1)" Pflicht
+          - Wenn tw2 vorhanden -> Node "Einsender (Abh. 2)" Pflicht
         => wenn beide vorhanden: beide müssen bedient werden (kein ODER)
 
     Rückgabe:
-      coords: [(lat, lon), ...]
-      node_tws: [None/tuple] (Depot None, sonst Pflicht-Zeitfenster)
-      service_mins: [int] (Depot 0)
-      labels: [str]
-      node_meta: DataFrame für Export (mapping node->einsender/pickup)
+      coords:         [(lat, lon), ...]
+      node_tws:       [None/tuple] (Depot None, sonst Pflicht-Zeitfenster)
+      service_mins:   [int] (Depot 0)
+      labels:         [str] – sprechend: Einsendername (+ Abh.-Nr. wenn mehrere)
+      node_senders:   [str] – Einsendername je Node (Depot = "")
+      node_addresses: [str] – Adresse je Node (Depot = "")
+      node_meta:      DataFrame für Export (mapping node -> einsender/pickup)
     """
-    coords = [(depot.lat, depot.lon)]
-    node_tws: list[tuple[int, int] | None] = [None]
-    service_mins = [0]
-    labels = ["LABOR"]
+    coords:         list[tuple[float, float]] = [(depot.lat, depot.lon)]
+    node_tws:       list[tuple[int, int] | None] = [None]
+    service_mins:   list[int] = [0]
+    labels:         list[str] = ["LABOR"]
+    node_senders:   list[str] = [""]
+    node_addresses: list[str] = [""]
 
     meta_rows = []
 
     for _, r in df.iterrows():
-        stop_id = str(r.get("id", r.get("name", "")))
-        lat = float(r["lat"])
-        lon = float(r["lon"])
+        fallback_id   = str(r.get("id", r.get("name", ""))).strip()
+        einsender_str = str(r.get("einsender", fallback_id)).strip() or fallback_id
+        adresse_str   = str(r.get("adresse", "")).strip()
+
+        lat     = float(r["lat"])
+        lon     = float(r["lon"])
         service = int(r.get("service_min", solve_cfg.default_service_min))
 
-        # Wenn beide leer: dann gibt es schlicht keine Abholungspflicht (kannst du auch als Fehler behandeln)
-        for pickup_no, tw in [(1, r["tw1"]), (2, r["tw2"])]:
-            if tw is None:
-                continue
+        tws = [(1, r["tw1"]), (2, r["tw2"])]
+        active_pickups = [(no, tw) for no, tw in tws if tw is not None]
+
+        for pickup_no, tw in active_pickups:
+            # Bei mehreren Abholungen Nr. anhängen, sonst nur Name
+            if len(active_pickups) > 1:
+                label = f"{einsender_str} (Abh. {pickup_no})"
+            else:
+                label = einsender_str
 
             coords.append((lat, lon))
             node_tws.append(tw)
             service_mins.append(service)
-            labels.append(f"{stop_id} (Pickup {pickup_no})")
+            labels.append(label)
+            node_senders.append(einsender_str)
+            node_addresses.append(adresse_str)
 
             node_index = len(coords) - 1
             meta_rows.append({
-                "node_index": node_index,
-                "einsender_id": stop_id,
-                "pickup_no": pickup_no,
-                "lat": lat,
-                "lon": lon,
-                "tw_start_min": tw[0],
-                "tw_end_min": tw[1],
-                "service_min": service,
+                "node_index":     node_index,
+                "einsender_id":   fallback_id,
+                "einsender_name": einsender_str,
+                "adresse":        adresse_str,
+                "pickup_no":      pickup_no,
+                "lat":            lat,
+                "lon":            lon,
+                "tw_start_min":   tw[0],
+                "tw_end_min":     tw[1],
+                "service_min":    service,
             })
 
     meta_df = pd.DataFrame(meta_rows)
-    return coords, node_tws, service_mins, labels, meta_df
+    return coords, node_tws, service_mins, labels, node_senders, node_addresses, meta_df

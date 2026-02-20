@@ -51,12 +51,12 @@ def main():
         reference_date=date.today(),
         default_service_min=5,
         max_wait_min=240,
-        max_route_duration_min=0,
+        max_route_duration_min=240,   # harte Obergrenze: 4 Stunden
     )
 
     # ── 1) Input laden ──────────────────────────────────────────────
     df = load_einsender_excel(excel_in, solve_cfg)
-    coords, node_tws, service_mins, labels, node_meta_df = (
+    coords, node_tws, service_mins, labels, node_senders, node_addresses, node_meta_df = (
         build_nodes_mandatory_both_windows(depot, df, solve_cfg)
     )
 
@@ -121,7 +121,10 @@ def main():
                 time_matrix_min=time_matrix_min, dist_matrix_m=dist_matrix_m,
                 node_service_mins=service_mins,
             ))
-        export_routes_map_html(routes=routes, labels=labels, coords=coords).save(debug_map_out)
+        export_routes_map_html(
+            routes=routes, labels=labels, coords=coords,
+            node_senders=node_senders, node_addresses=node_addresses,
+        ).save(debug_map_out)
 
         print(f"\n🔎 Debug-Exports: {debug_excel_out} + {debug_map_out}")
         raise RuntimeError("Keine harte Lösung – Debug-Exports erstellt.")
@@ -147,7 +150,10 @@ def main():
             time_matrix_min=time_matrix_min, dist_matrix_m=dist_matrix_m,
             node_service_mins=service_mins,
         ))
-    export_routes_map_html(routes=routes, labels=labels, coords=coords).save(map_out)
+    export_routes_map_html(
+        routes=routes, labels=labels, coords=coords,
+        node_senders=node_senders, node_addresses=node_addresses,
+    ).save(map_out)
 
     print(f"✅ Excel exportiert: {excel_out}")
     print(f"✅ Karte exportiert: {map_out}")

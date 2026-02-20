@@ -5,8 +5,9 @@ Starten: streamlit run app.py
 from __future__ import annotations
 
 import warnings
-from datetime import date
+from datetime import date, datetime, time as dt_time
 
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -52,10 +53,12 @@ with st.sidebar:
     d3_bis = c2.text_input("Fenster 3 bis", "18:00")
 
     st.subheader("Solver")
-    num_vehicles = st.number_input("Anzahl Fahrzeuge",    min_value=1, max_value=30,  value=6)
-    service_min  = st.number_input("Servicezeit (min)",   min_value=0, max_value=60,  value=5)
-    max_wait     = st.number_input("Max. Wartezeit (min)", min_value=0, max_value=480, value=240)
-    ref_date     = st.date_input("Referenzdatum", value=date.today())
+    num_vehicles  = st.number_input("Anzahl Fahrzeuge",        min_value=1, max_value=30,  value=6)
+    service_min   = st.number_input("Servicezeit (min)",        min_value=0, max_value=60,  value=5)
+    max_wait      = st.number_input("Max. Wartezeit (min)",     min_value=0, max_value=480, value=240)
+    max_route_dur = st.number_input("Max. Tourdauer (min)",     min_value=0, max_value=720, value=240,
+                                    help="0 = keine Begrenzung. Standard: 240 min (4 Stunden)")
+    ref_date      = st.date_input("Referenzdatum", value=date.today())
 
 # ── Haupt-Bereich ───────────────────────────────────────────────────
 uploaded = st.file_uploader("📂 Einsender-Datei (.xlsx) hochladen", type=["xlsx"])
@@ -76,14 +79,16 @@ solve_cfg = SolveConfig(
     reference_date=ref_date,
     default_service_min=service_min,
     max_wait_min=max_wait,
-    max_route_duration_min=0,
+    max_route_duration_min=max_route_dur,
 )
+# Basiszeit für Uhrzeitumrechnung (00:00 des Referenzdatums)
+time_origin = datetime.combine(ref_date, dt_time(0, 0))
 
 # ── Schritt 1: Daten laden ──────────────────────────────────────────
 with st.spinner("Lade Eingabedaten …"):
     try:
         df = load_einsender_excel(uploaded, solve_cfg)
-        coords, node_tws, service_mins, labels, node_meta_df = (
+        coords, node_tws, service_mins, labels, node_senders, node_addresses, node_meta_df = (
             build_nodes_mandatory_both_windows(depot, df, solve_cfg)
         )
     except Exception as e:
@@ -106,11 +111,11 @@ with st.spinner("Berechne Fahrzeit-Matrix (OSRM) …"):
 depot_windows = depot_union_windows(depot, solve_cfg)
 stats = summarize_input(df, node_meta_df)
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Einsender",     stats["einsender_rows"])
-c2.metric("Pflicht-Nodes", stats["mandatory_nodes_created"])
-c3.metric("Fahrzeuge",     num_vehicles)
-c4.metric("Leere Fenster", stats["tw1_empty"] + stats["tw2_empty"])
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Einsender",     stats["einsender_rows"])
+m2.metric("Pflicht-Nodes", stats["mandatory_nodes_created"])
+m3.metric("Fahrzeuge",     num_vehicles)
+m4.metric("Leere Fenster", stats["tw1_empty"] + stats["tw2_empty"])
 
 problems = (
     check_depot_union(depot_windows)
@@ -145,7 +150,7 @@ with st.spinner("Optimiere Routen …"):
             st.error("Auch die Relaxierung liefert keine Lösung. Prüfe Matrix und Depotfenster.")
             st.stop()
 
-        routes    = relaxed["routes"]
+        routes     = relaxed["routes"]
         is_relaxed = True
 
         violations = relaxed["violations"]
@@ -158,25 +163,72 @@ with st.spinner("Optimiere Routen …"):
                 )
 
 # ── Schritt 5: Ergebnisse anzeigen ──────────────────────────────────
-tab_map, tab_routes, tab_dl = st.tabs(["🗺️ Karte", "📋 Routen", "📥 Download"])
+tab_map, tab_routes, tab_einsender, tab_dl = st.tabs(
+    ["🗺️ Karte", "📋 Routen", "🏥 Einsender", "📥 Download"]
+)
 
+# ── Tab: Karte ──────────────────────────────────────────────────────
 with tab_map:
-    m = export_routes_map_html(routes=routes, labels=labels, coords=coords)
-    components.html(m._repr_html_(), height=620)
+    m = export_routes_map_html(
+        routes=routes,
+        labels=labels,
+        coords=coords,
+        node_senders=node_senders,
+        node_addresses=node_addresses,
+        time_origin=time_origin,
+    )
+    components.html(m._repr_html_(), height=640)
 
+# ── Tab: Routen ─────────────────────────────────────────────────────
 with tab_routes:
     for i, route in enumerate(routes, start=1):
-        with st.expander(f"Route #{i}  ({len(route) - 1} Stopps + Depot)", expanded=True):
-            rows = [
-                {
-                    "Ankunft": fmt_min_to_hhmm(solve_cfg.reference_date, int(step[1])),
-                    "Node":    labels[step[0]],
-                    "Wartezeit": f"{int(step[2])} min" if len(step) > 2 else "—",
-                }
-                for step in route
-            ]
+        n_stops = sum(1 for step in route if step[0] != 0)
+        with st.expander(f"Route #{i}  –  {n_stops} Stopp(s)", expanded=True):
+            rows = []
+            for step in route:
+                node = step[0]
+                tmin = int(step[1])
+                slack = int(step[2]) if len(step) > 2 else 0
+                rows.append({
+                    "Uhrzeit":   fmt_min_to_hhmm(solve_cfg.reference_date, tmin),
+                    "Einsender": node_senders[node] if node_senders[node] else "LABOR (Depot)",
+                    "Adresse":   node_addresses[node],
+                    "Wartezeit": f"{slack} min" if slack else "—",
+                })
             st.dataframe(rows, use_container_width=True, hide_index=True)
 
+# ── Tab: Einsender ──────────────────────────────────────────────────
+with tab_einsender:
+    # Baue Mapping: node_index → (route_id, arrival_min)
+    node_to_route: dict[int, tuple[int, int]] = {}
+    for r_idx, route in enumerate(routes, start=1):
+        for step in route:
+            node = step[0]
+            tmin = int(step[1])
+            if node != 0:
+                node_to_route[node] = (r_idx, tmin)
+
+    einsender_rows = []
+    for _, meta in node_meta_df.iterrows():
+        node_idx = int(meta["node_index"])
+        route_id, arrival = node_to_route.get(node_idx, (None, None))
+
+        tw_s = fmt_min_to_hhmm(solve_cfg.reference_date, int(meta["tw_start_min"]))
+        tw_e = fmt_min_to_hhmm(solve_cfg.reference_date, int(meta["tw_end_min"]))
+
+        einsender_rows.append({
+            "Einsender":   meta.get("einsender_name", meta["einsender_id"]),
+            "Adresse":     meta.get("adresse", ""),
+            "Abholung":    f"Abh. {int(meta['pickup_no'])}",
+            "Route":       f"Route {route_id}" if route_id else "—",
+            "Ankunft":     fmt_min_to_hhmm(solve_cfg.reference_date, arrival) if arrival is not None else "—",
+            "Zeitfenster": f"{tw_s} – {tw_e}",
+        })
+
+    einsender_df = pd.DataFrame(einsender_rows)
+    st.dataframe(einsender_df, use_container_width=True, hide_index=True)
+
+# ── Tab: Download ────────────────────────────────────────────────────
 with tab_dl:
     excel_bytes = export_solution_to_excel(
         day=solve_cfg.reference_date,
