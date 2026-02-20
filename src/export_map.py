@@ -1,4 +1,3 @@
-# python
 from __future__ import annotations
 
 import folium
@@ -7,7 +6,6 @@ from typing import Optional, Union
 
 
 def export_routes_map_html(
-        out_html: str,
         routes: list[list[tuple]],
         labels: list[str],
         coords: list[tuple[float, float]],
@@ -15,15 +13,17 @@ def export_routes_map_html(
         addresses: Optional[list[str]] = None,
         time_origin: Optional[Union[str, datetime]] = None,
         time_format: str = "%Y-%m-%d %H:%M",
-):
+) -> folium.Map:
     """
-    Erzeugt eine interaktive Karte (Folium).
-    - Optional: `senders` und `addresses` (parallel zu `labels`) werden im Popup angezeigt.
-    - `time_origin` kann ein datetime oder ISO-String sein; wenn None -> heutiges 00:00.
-    - `tmin` in den Route-Steps wird als Minuten seit `time_origin` interpretiert und als echte Uhrzeit angezeigt.
-    """
+    Erzeugt eine interaktive Folium-Karte und gibt das Map-Objekt zurück.
 
-    # Basiszeit bestimmen
+    Für Streamlit:    st.components.v1.html(m._repr_html_(), height=600)
+    Für CLI/Datei:    m.save("solution_map.html")
+
+    Optional: `senders` und `addresses` (parallel zu `labels`) werden im Popup angezeigt.
+    `time_origin` kann ein datetime oder ISO-String sein; wenn None -> heutiges 00:00.
+    `tmin` in den Route-Steps wird als Minuten seit `time_origin` als echte Uhrzeit angezeigt.
+    """
     if time_origin is None:
         origin = datetime.combine(datetime.today(), datetime.min.time())
     elif isinstance(time_origin, str):
@@ -55,7 +55,6 @@ def export_routes_map_html(
             lat, lon = coords[node]
             latlons.append((lat, lon))
 
-            # Popup-Zusammenbau: Name / Adresse / Zeit / Wartezeit
             sender = senders[node] if (senders and node < len(senders)) else None
             address = addresses[node] if (addresses and node < len(addresses)) else None
 
@@ -74,12 +73,10 @@ def export_routes_map_html(
             if slack:
                 popup_parts.append(f"Wartezeit ≈ {int(slack)} min")
 
-            popup_html = "<br>".join(popup_parts)
-
             folium.CircleMarker(
                 location=[lat, lon],
                 radius=5,
-                popup=popup_html,
+                popup="<br>".join(popup_parts),
                 tooltip=f"R{r_idx}: {labels[node]}",
             ).add_to(m)
 
@@ -90,4 +87,4 @@ def export_routes_map_html(
             tooltip=f"Route {r_idx}",
         ).add_to(m)
 
-    m.save(out_html)
+    return m

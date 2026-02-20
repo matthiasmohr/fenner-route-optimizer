@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import pandas as pd
+from io import BytesIO
 from datetime import datetime, date, time, timedelta
+
+import pandas as pd
 
 
 def fmt_min_to_datetime(day: date, mins: int) -> datetime:
@@ -9,7 +11,6 @@ def fmt_min_to_datetime(day: date, mins: int) -> datetime:
 
 
 def export_solution_to_excel(
-        out_path: str,
         day: date,
         routes: list[list[tuple]],
         labels: list[str],
@@ -18,21 +19,18 @@ def export_solution_to_excel(
         time_matrix_min: list[list[int]],
         dist_matrix_m: list[list[int]],
         node_service_mins: list[int],
-):
+) -> bytes:
     """
-    Exportiert:
-      Sheet "routes": Zeile pro Stopp (inkl. Segmentzeiten/-distanzen)
-      Sheet "route_totals": Summen je Route (km, Fahrzeit, Wartezeit, Service, Gesamt)
-      Sheet "nodes": Node-Metadaten
-      Sheet "summary": Überblick
+    Gibt die fertige Excel-Datei als bytes zurück (BytesIO).
+    Für den CLI-Betrieb: with open(path, "wb") as f: f.write(export_solution_to_excel(...))
+    Für Streamlit:       st.download_button(..., data=export_solution_to_excel(...))
 
-    routes kann Steps enthalten als:
-      - (node, tmin) oder
-      - (node, tmin, irgendwas)
-    Wir verwenden IMMER node = step[0], tmin = step[1].
-    Wartezeit berechnen wir EXAKT aus Differenzen der CumulTimes.
+    Sheets:
+      - routes:       Zeile pro Stopp inkl. Segmentzeiten/-distanzen
+      - route_totals: Summen je Route (km, Fahrzeit, Wartezeit, Service, Gesamt)
+      - nodes:        Node-Metadaten
+      - summary:      Überblick
     """
-
     rows = []
     totals = []
 
@@ -48,10 +46,8 @@ def export_solution_to_excel(
         for seq, step in enumerate(route):
             node = step[0]
             tmin = int(step[1])
-
             lat, lon = coords[node]
 
-            # Segmentwerte (vom Vorgänger auf diesen Node)
             if seq == 0:
                 prev_node = None
                 travel = 0
@@ -65,14 +61,11 @@ def export_solution_to_excel(
 
                 travel = int(time_matrix_min[prev_node][node])
                 dist_m = int(dist_matrix_m[prev_node][node])
-
-                # Service ist in deinem Modell am Zielknoten im Transit enthalten
                 service = int(node_service_mins[node]) if node != 0 else 0
 
-                # EXAKTE Wartezeit (kann 0 sein, oder >0 wenn Zeitfenster/Depotfenster erzwingt)
+                # Exakte Wartezeit; kann durch Rundungen leicht negativ werden -> clamp
                 wait = tmin - prev_tmin - travel - service
                 if wait < 0:
-                    # numerische Rundungen / Matrix-Minuten können das leicht negativ machen -> clamp
                     wait = 0
 
                 drive_sum += travel
@@ -109,7 +102,6 @@ def export_solution_to_excel(
 
     routes_df = pd.DataFrame(rows)
     totals_df = pd.DataFrame(totals)
-
     summary_df = pd.DataFrame([{
         "routes_used": int(len(totals_df)),
         "total_stops_including_depot": int(routes_df.shape[0]),
@@ -120,8 +112,10 @@ def export_solution_to_excel(
         "total_time_min_all_routes": int(totals_df["total_time_min"].sum()) if not totals_df.empty else 0,
     }])
 
-    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         routes_df.to_excel(writer, index=False, sheet_name="routes")
         totals_df.to_excel(writer, index=False, sheet_name="route_totals")
         node_meta_df.to_excel(writer, index=False, sheet_name="nodes")
         summary_df.to_excel(writer, index=False, sheet_name="summary")
+    return buf.getvalue()

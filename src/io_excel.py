@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime, date, time
 from dateutil import parser as dtparser
 
-from config import SolveConfig, DepotConfig
+from .config import SolveConfig, DepotConfig
 
 
 def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:

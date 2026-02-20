@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime, date, time, timedelta
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
-from config import SolveConfig
-from io_excel import depot_union_windows
+from .config import SolveConfig
+from .io_excel import depot_union_windows
 
 
 def restrict_intvar_to_union(intvar, windows: list[tuple[int, int]]):
