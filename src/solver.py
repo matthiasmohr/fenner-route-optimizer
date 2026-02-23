@@ -86,8 +86,11 @@ def solve_vrptw(
     routing.SetArcCostEvaluatorOfAllVehicles(transit_idx)
 
     horizon = 24 * 60
-    max_route = horizon if solve_cfg.max_route_duration_min == 0 else solve_cfg.max_route_duration_min
 
+    # "Time"-Dimension: absoluter Taktgeber (Minuten seit 00:00).
+    # capacity MUSS 24*60 sein – capacity ist der maximale absolute CumulVar-Wert,
+    # NICHT die Tourdauer. Würde man hier max_route_duration_min übergeben,
+    # kollidiert es mit Depotfenstern >= 660 min (11:00 Uhr).
     routing.AddDimension(
         transit_idx,
         solve_cfg.max_wait_min,  # maximale Wartezeit (slack) insgesamt
@@ -96,6 +99,17 @@ def solve_vrptw(
         "Time",
     )
     time_dim = routing.GetDimensionOrDie("Time")
+
+    # "Duration"-Dimension: misst die reine Tourdauer ab Abfahrt (fix_start=True → startet bei 0).
+    # Über capacity wird die Maximaldauer hart begrenzt.
+    if solve_cfg.max_route_duration_min > 0:
+        routing.AddDimension(
+            transit_idx,
+            solve_cfg.max_wait_min,
+            solve_cfg.max_route_duration_min,
+            True,   # fix_start_cumul_to_zero=True: CumulVar = vergangene Zeit seit Depot
+            "Duration",
+        )
 
     # Depotfenster: NUR fürs Ende (Einlieferung)
     depot_windows = depot_union_windows(depot, solve_cfg)
@@ -107,10 +121,6 @@ def solve_vrptw(
         # Ende muss in Depot-Union liegen
         restrict_intvar_to_union(time_dim.CumulVar(routing.End(v)), depot_windows)
 
-        # Tourdauer begrenzen (Span = End - Start)
-        if max_route < horizon:
-            time_dim.SetSpanUpperBoundForVehicle(max_route, v)
-
     # Kundenzeitfenster: harte Constraints
     for node in range(1, n_locations):
         tw = node_time_windows[node]
@@ -119,7 +129,7 @@ def solve_vrptw(
         idx = manager.NodeToIndex(node)
         time_dim.CumulVar(idx).SetRange(tw[0], tw[1])
 
-    # Optional: reduziert oft „unnötig frühe“ Starts (minimiert Spannweite der Touren)
+    # Optional: reduziert oft „unnötig frühe" Starts (minimiert Spannweite der Touren)
     # time_dim.SetGlobalSpanCostCoefficient(1)
 
     # Suchparameter
@@ -204,7 +214,6 @@ def solve_vrptw_relaxed_soft_timewindows(
     routing.SetArcCostEvaluatorOfAllVehicles(transit_idx)
 
     horizon = 24 * 60
-    max_route = horizon if solve_cfg.max_route_duration_min == 0 else solve_cfg.max_route_duration_min
 
     routing.AddDimension(
         transit_idx,
@@ -215,15 +224,20 @@ def solve_vrptw_relaxed_soft_timewindows(
     )
     time_dim = routing.GetDimensionOrDie("Time")
 
+    if solve_cfg.max_route_duration_min > 0:
+        routing.AddDimension(
+            transit_idx,
+            solve_cfg.max_wait_min,
+            solve_cfg.max_route_duration_min,
+            True,
+            "Duration",
+        )
+
     # Depot-Ende hart in Union, Start frei
     depot_windows = depot_union_windows(depot, solve_cfg)
     for v in range(num_vehicles):
         time_dim.CumulVar(routing.Start(v)).SetRange(0, horizon)
         restrict_intvar_to_union(time_dim.CumulVar(routing.End(v)), depot_windows)
-
-        # Tourdauer begrenzen (Span = End - Start)
-        if max_route < horizon:
-            time_dim.SetSpanUpperBoundForVehicle(max_route, v)
 
     # Kunden-TWs soft: großer Range + SoftBounds
     for node in range(1, n_locations):
