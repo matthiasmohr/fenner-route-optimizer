@@ -5,6 +5,8 @@ from datetime import datetime, date, time, timedelta
 
 import pandas as pd
 
+from .route_stats import compute_route_totals
+
 
 def fmt_min_to_datetime(day: date, mins: int) -> datetime:
     return datetime.combine(day, time(0, 0)) + timedelta(minutes=mins)
@@ -31,17 +33,12 @@ def export_solution_to_excel(
       - nodes:        Node-Metadaten
       - summary:      Überblick
     """
+    # ── Zeile pro Stopp (Detail-Sheet) ─────────────────────────────────
     rows = []
-    totals = []
 
     for r_idx, route in enumerate(routes, start=1):
         if len(route) < 2:
             continue
-
-        drive_sum = 0
-        wait_sum = 0
-        service_sum = 0
-        dist_sum_m = 0
 
         for seq, step in enumerate(route):
             node = step[0]
@@ -68,11 +65,6 @@ def export_solution_to_excel(
                 if wait < 0:
                     wait = 0
 
-                drive_sum += travel
-                wait_sum += wait
-                service_sum += service
-                dist_sum_m += dist_m
-
             rows.append({
                 "route_id": r_idx,
                 "seq": seq,
@@ -91,14 +83,8 @@ def export_solution_to_excel(
                 "lon": lon,
             })
 
-        totals.append({
-            "route_id": r_idx,
-            "total_dist_km": dist_sum_m / 1000.0,
-            "total_drive_min": drive_sum,
-            "total_wait_min": wait_sum,
-            "total_service_min": service_sum,
-            "total_time_min": drive_sum + wait_sum + service_sum,
-        })
+    # ── Aggregierte Kennzahlen (via shared Funktion) ───────────────────
+    totals = compute_route_totals(routes, time_matrix_min, dist_matrix_m, node_service_mins)
 
     routes_df = pd.DataFrame(rows)
     totals_df = pd.DataFrame(totals)

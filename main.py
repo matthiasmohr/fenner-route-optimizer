@@ -30,7 +30,7 @@ def main():
     warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
     # ── Dateipfade ──────────────────────────────────────────────────
-    excel_in        = "src/einsender.xlsx"
+    excel_in        = "einsender.xlsx"
     excel_out       = "solution.xlsx"
     map_out         = "solution_map.html"
     debug_excel_out = "solution_relaxed.xlsx"

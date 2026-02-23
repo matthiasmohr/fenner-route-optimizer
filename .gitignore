@@ -30,3 +30,6 @@ Thumbs.db
 
 # Umgebungsvariablen
 .env
+
+# AI
+.claude/

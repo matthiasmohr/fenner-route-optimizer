@@ -20,6 +20,7 @@ from src.io_excel import (
 from src.matrix import build_matrices
 from src.solver import solve_vrptw, solve_vrptw_relaxed_soft_timewindows, fmt_min_to_hhmm
 from src.export_excel import export_solution_to_excel
+from src.route_stats import compute_route_totals
 from src.export_map import export_routes_map_html
 from src.debug_checks import (
     check_basic_nodes,
@@ -59,6 +60,13 @@ with st.sidebar:
     max_route_dur = st.number_input("Max. Tourdauer (min)",     min_value=0, max_value=720, value=240,
                                     help="0 = keine Begrenzung. Standard: 240 min (4 Stunden)")
     ref_date      = st.date_input("Referenzdatum", value=date.today())
+
+    st.subheader("Kosten")
+    cost_ct_per_km = st.number_input("Streckenkosten (ct/km)", min_value=0, max_value=500, value=30,
+                                      help="Kosten pro gefahrenem Kilometer in Cent")
+    cost_eur_per_h = st.number_input("Zeitkosten (EUR/h)", min_value=0.0, max_value=200.0, value=35.0,
+                                      step=0.5, format="%.2f",
+                                      help="Kosten pro Stunde (Fahrzeit + Wartezeit + Service)")
 
 # ── Haupt-Bereich ───────────────────────────────────────────────────
 uploaded = st.file_uploader("📂 Einsender-Datei (.xlsx) hochladen", type=["xlsx"])
@@ -163,8 +171,8 @@ with st.spinner("Optimiere Routen …"):
                 )
 
 # ── Schritt 5: Ergebnisse anzeigen ──────────────────────────────────
-tab_map, tab_routes, tab_einsender, tab_dl = st.tabs(
-    ["🗺️ Karte", "📋 Routen", "🏥 Einsender", "📥 Download"]
+tab_map, tab_routes, tab_einsender, tab_costs, tab_dl = st.tabs(
+    ["🗺️ Karte", "📋 Routen", "🏥 Einsender", "💰 Kosten", "📥 Download"]
 )
 
 # ── Tab: Karte ──────────────────────────────────────────────────────
@@ -227,6 +235,70 @@ with tab_einsender:
 
     einsender_df = pd.DataFrame(einsender_rows)
     st.dataframe(einsender_df, use_container_width=True, hide_index=True)
+
+# ── Tab: Kosten ────────────────────────────────────────────────────
+with tab_costs:
+    route_totals = compute_route_totals(routes, time_matrix_min, dist_matrix_m, service_mins)
+
+    cost_rows = []
+    sum_dist = 0.0
+    sum_drive = 0
+    sum_wait = 0
+    sum_service = 0
+    sum_time = 0
+    sum_cost_dist = 0.0
+    sum_cost_time = 0.0
+    sum_cost_total = 0.0
+
+    for rt in route_totals:
+        k_strecke = rt["total_dist_km"] * (cost_ct_per_km / 100.0)
+        k_zeit = rt["total_time_min"] * (cost_eur_per_h / 60.0)
+        k_gesamt = k_strecke + k_zeit
+
+        sum_dist += rt["total_dist_km"]
+        sum_drive += rt["total_drive_min"]
+        sum_wait += rt["total_wait_min"]
+        sum_service += rt["total_service_min"]
+        sum_time += rt["total_time_min"]
+        sum_cost_dist += k_strecke
+        sum_cost_time += k_zeit
+        sum_cost_total += k_gesamt
+
+        cost_rows.append({
+            "Route": f"Route {rt['route_id']}",
+            "Stopps": rt["n_stops"],
+            "Distanz (km)": f"{rt['total_dist_km']:.1f}",
+            "Fahrzeit (min)": rt["total_drive_min"],
+            "Wartezeit (min)": rt["total_wait_min"],
+            "Service (min)": rt["total_service_min"],
+            "Gesamtzeit (min)": rt["total_time_min"],
+            "Strecke (EUR)": f"{k_strecke:.2f}",
+            "Zeit (EUR)": f"{k_zeit:.2f}",
+            "Gesamt (EUR)": f"{k_gesamt:.2f}",
+        })
+
+    # Summenzeile
+    cost_rows.append({
+        "Route": "GESAMT",
+        "Stopps": sum(rt["n_stops"] for rt in route_totals),
+        "Distanz (km)": f"{sum_dist:.1f}",
+        "Fahrzeit (min)": sum_drive,
+        "Wartezeit (min)": sum_wait,
+        "Service (min)": sum_service,
+        "Gesamtzeit (min)": sum_time,
+        "Strecke (EUR)": f"{sum_cost_dist:.2f}",
+        "Zeit (EUR)": f"{sum_cost_time:.2f}",
+        "Gesamt (EUR)": f"{sum_cost_total:.2f}",
+    })
+
+    # Kennzahlen-Kacheln
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Gesamtkosten", f"{sum_cost_total:.2f} EUR")
+    k2.metric("davon Strecke", f"{sum_cost_dist:.2f} EUR")
+    k3.metric("davon Zeit", f"{sum_cost_time:.2f} EUR")
+    k4.metric("Gesamt-km", f"{sum_dist:.1f} km")
+
+    st.dataframe(cost_rows, use_container_width=True, hide_index=True)
 
 # ── Tab: Download ────────────────────────────────────────────────────
 with tab_dl:

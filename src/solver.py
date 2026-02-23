@@ -91,7 +91,7 @@ def solve_vrptw(
     routing.AddDimension(
         transit_idx,
         solve_cfg.max_wait_min,  # maximale Wartezeit (slack) insgesamt
-        max_route,               # maximale Tourdauer (0 => horizon oben)
+        horizon,                 # Kapazität = voller Zeithorizont (CumulVar = absolute Uhrzeit)
         False,
         "Time",
     )
@@ -106,6 +106,10 @@ def solve_vrptw(
 
         # Ende muss in Depot-Union liegen
         restrict_intvar_to_union(time_dim.CumulVar(routing.End(v)), depot_windows)
+
+        # Tourdauer begrenzen (Span = End - Start)
+        if max_route < horizon:
+            time_dim.SetSpanUpperBoundForVehicle(max_route, v)
 
     # Kundenzeitfenster: harte Constraints
     for node in range(1, n_locations):
@@ -205,7 +209,7 @@ def solve_vrptw_relaxed_soft_timewindows(
     routing.AddDimension(
         transit_idx,
         solve_cfg.max_wait_min,
-        max_route,
+        horizon,                 # Kapazität = voller Zeithorizont (CumulVar = absolute Uhrzeit)
         False,
         "Time",
     )
@@ -216,6 +220,10 @@ def solve_vrptw_relaxed_soft_timewindows(
     for v in range(num_vehicles):
         time_dim.CumulVar(routing.Start(v)).SetRange(0, horizon)
         restrict_intvar_to_union(time_dim.CumulVar(routing.End(v)), depot_windows)
+
+        # Tourdauer begrenzen (Span = End - Start)
+        if max_route < horizon:
+            time_dim.SetSpanUpperBoundForVehicle(max_route, v)
 
     # Kunden-TWs soft: großer Range + SoftBounds
     for node in range(1, n_locations):
