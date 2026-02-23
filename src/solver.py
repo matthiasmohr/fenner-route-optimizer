@@ -86,16 +86,30 @@ def solve_vrptw(
     routing.SetArcCostEvaluatorOfAllVehicles(transit_idx)
 
     horizon = 24 * 60
-    max_route = horizon if solve_cfg.max_route_duration_min == 0 else solve_cfg.max_route_duration_min
 
+    # "Time"-Dimension: absoluter Taktgeber (Minuten seit 00:00).
+    # capacity MUSS 24*60 sein – capacity ist der maximale absolute CumulVar-Wert,
+    # NICHT die Tourdauer. Würde man hier max_route_duration_min übergeben,
+    # kollidiert es mit Depotfenstern >= 660 min (11:00 Uhr).
     routing.AddDimension(
         transit_idx,
-        solve_cfg.max_wait_min,  # maximale Wartezeit (slack) insgesamt
-        max_route,               # maximale Tourdauer (0 => horizon oben)
+        solve_cfg.max_wait_min,  # max. Wartezeit (slack) pro Node
+        horizon,                 # max. absoluter Zeitwert = 24 h
         False,
         "Time",
     )
     time_dim = routing.GetDimensionOrDie("Time")
+
+    # "Duration"-Dimension: misst die reine Tourdauer ab Abfahrt (fix_start=True → startet bei 0).
+    # Über capacity wird die Maximaldauer hart begrenzt.
+    if solve_cfg.max_route_duration_min > 0:
+        routing.AddDimension(
+            transit_idx,
+            solve_cfg.max_wait_min,
+            solve_cfg.max_route_duration_min,
+            True,   # fix_start_cumul_to_zero=True: CumulVar = vergangene Zeit seit Depot
+            "Duration",
+        )
 
     # Depotfenster: NUR fürs Ende (Einlieferung)
     depot_windows = depot_union_windows(depot, solve_cfg)
@@ -200,16 +214,24 @@ def solve_vrptw_relaxed_soft_timewindows(
     routing.SetArcCostEvaluatorOfAllVehicles(transit_idx)
 
     horizon = 24 * 60
-    max_route = horizon if solve_cfg.max_route_duration_min == 0 else solve_cfg.max_route_duration_min
 
     routing.AddDimension(
         transit_idx,
         solve_cfg.max_wait_min,
-        max_route,
+        horizon,
         False,
         "Time",
     )
     time_dim = routing.GetDimensionOrDie("Time")
+
+    if solve_cfg.max_route_duration_min > 0:
+        routing.AddDimension(
+            transit_idx,
+            solve_cfg.max_wait_min,
+            solve_cfg.max_route_duration_min,
+            True,
+            "Duration",
+        )
 
     # Depot-Ende hart in Union, Start frei
     depot_windows = depot_union_windows(depot, solve_cfg)
